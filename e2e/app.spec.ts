@@ -772,6 +772,10 @@ async function mock(page: Page) {
     if (resource === "auth/reauthenticate")
       return route.fulfill({ json: { ok: true } });
     if (resource === "dashboard") return route.fulfill({ json: summary });
+    if (resource === "savings/overview")
+      return route.fulfill({
+        json: { goals: [], spaces: [], plans: [], participants: [] },
+      });
     if (route.request().method() !== "GET")
       return route.fulfill({ json: { id: gid, ok: true } });
     return route.fulfill({
@@ -1419,7 +1423,7 @@ test("Editar el resumen y reintentar conservan una sola confirmación idempotent
   expect(keys[0]).toBe(keys[1]);
 });
 
-test("Objetivos compartidos muestran cuotas y sugieren reparto por vencimiento", async ({
+test("Objetivos compartidos muestran cuotas y consultan el reparto dinámico del backend", async ({
   page,
 }) => {
   await mock(page);
@@ -1521,16 +1525,262 @@ test("Objetivos compartidos muestran cuotas y sugieren reparto por vencimiento",
   await page
     .getByRole("button", { name: "Distribuir por porcentaje", exact: true })
     .click();
-  await page.getByRole("button", { name: "Sugerir por fecha de fin" }).click();
+  let requested = false;
+  await page.route("**/api/v1/savings/planner?*", (r) => {
+    requested = true;
+    expect(new URL(r.request().url()).searchParams.get("fund_amount")).toBe(
+      "1000",
+    );
+    return r.fulfill({
+      json: {
+        schedule: [
+          {
+            allocations: [
+              { goal_id: gid, amount: 413.27 },
+              { goal_id: "middle", amount: 210.12 },
+              { goal_id: "later", amount: 376.61 },
+            ],
+          },
+        ],
+      },
+    });
+  });
+  await page
+    .getByRole("dialog")
+    .getByLabel("Monto del fondo a distribuir")
+    .fill("1000");
+  await page.getByRole("button", { name: "Calcular reparto dinámico" }).click();
   await expect(
     page.getByLabel("Porcentaje Viaje compartido", { exact: true }),
-  ).toHaveValue("50");
+  ).toHaveValue("41.32");
   await expect(
     page.getByLabel("Porcentaje Equipo", { exact: true }),
-  ).toHaveValue("30");
+  ).toHaveValue("21.01");
   await expect(
     page.getByLabel("Porcentaje Estudios", { exact: true }),
-  ).toHaveValue("20");
+  ).toHaveValue("37.66");
+  expect(requested).toBe(true);
+  await expect(
+    page.getByLabel("Porcentaje Sin asignar", { exact: true }),
+  ).toHaveValue("0.01");
+});
+
+test("Planificador guarda planes con autorización explícita sin realizar movimientos", async ({
+  page,
+}) => {
+  await mock(page);
+  const m = now.slice(0, 7);
+  const fixture = {
+    currency: "PEN",
+    startMonth: m,
+    requestedMonth: m,
+    assumption: "Previsión mensual privada.",
+    horizonLimited: false,
+    budgets: [
+      {
+        month: m,
+        monthlyIncome: 3000,
+        savingsPercentage: 20,
+        desired: 600,
+        financiallyAvailable: 600,
+        maximumSavings: 600,
+        essentialExpenses: 1000,
+        pendingObligations: 0,
+        confirmed: 25,
+        amount: 100,
+      },
+    ],
+    schedule: [
+      {
+        month: m,
+        budget: 100,
+        assigned: 100,
+        unassigned: 0,
+        allocations: [{ goal_id: gid, amount: 100 }],
+      },
+    ],
+    confirmedContributions: [{ goal_id: gid, amount: 25, month: m }],
+    goals: [
+      {
+        id: gid,
+        name: "Viaje",
+        space_id: "space",
+        deadline: `${m}-28`,
+        percentage: 50,
+        remaining: 200,
+        monthlyRequired: 200,
+        accumulatedDeficit: 0,
+        feasible: false,
+        deficit: 100,
+        participationMissing: false,
+        status: "behind",
+      },
+    ],
+    conflicts: [],
+  };
+  await page.route("**/api/v1/savings/planner?*", (r) =>
+    r.fulfill({ json: fixture }),
+  );
+  let realMovements = 0;
+  page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      /\/(allocations|transactions|savings\/distribute)$/.test(
+        new URL(r.url()).pathname,
+      )
+    )
+      realMovements++;
+  });
+  await page
+    .locator("nav")
+    .getByRole("button", { name: "Planificador de ahorro", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Distribución mensual recomendada" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Tu parte no se cumple a tiempo/)).toBeVisible();
+  await expect(
+    page.getByLabel("Compartir mi plan de Viaje con el espacio"),
+  ).not.toBeChecked();
+  await page
+    .getByLabel("Aporte pendiente para Viaje", { exact: true })
+    .fill("80");
+  await page.getByLabel("Compartir mi plan de Viaje con el espacio").check();
+  const saved = page.waitForRequest(
+    (r) => r.url().endsWith("/savings/planner/plans") && r.method() === "PUT",
+  );
+  await page
+    .getByRole("button", { name: `Guardar planificación de ${m}` })
+    .click();
+  expect((await saved).postDataJSON()).toEqual({
+    entries: [
+      { goal_id: gid, month: `${m}-01`, amount: 105, share_authorized: true },
+    ],
+  });
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "No se ha reservado ni transferido dinero" }),
+  ).toBeVisible();
+  expect(realMovements).toBe(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("Resumen del espacio separa avance financiero, tiempo e historial autorizado", async ({
+  page,
+}) => {
+  await mock(page);
+  const m = now.slice(0, 7);
+  const goal = {
+    id: gid,
+    name: "Viaje familiar",
+    currency: "PEN",
+    space_id: "space",
+    ideal_amount: 1000,
+    confirmed: 250,
+    remaining: 750,
+    progress: 25,
+    elapsedPercentage: 60,
+    status: "behind",
+    viability: "shortfall",
+    start_date: `${m}-01`,
+    target_date: "2027-12-31",
+    priority: 1,
+    monthsRemaining: 12,
+    daysRemaining: 360,
+    monthlyRequired: 62.5,
+    expectedSaved: 600,
+    shortfallToDate: 350,
+    projectedDeficit: 650,
+    estimatedCompletion: null,
+    history: [
+      {
+        id: "history",
+        user_id: uid,
+        amount: 250,
+        currency: "PEN",
+        created_at: `${m}-02T12:00:00Z`,
+      },
+    ],
+  };
+  await page.route("**/api/v1/savings/overview?*", (r) =>
+    r.fulfill({
+      json: {
+        goals: [goal],
+        spaces: [
+          {
+            id: "space",
+            name: "Familia",
+            currency: "PEN",
+            target: 1000,
+            confirmed: 250,
+            remaining: 750,
+            goalCount: 1,
+            completed: 0,
+            atRisk: 1,
+            monthlyRequired: 62.5,
+            monthlyPlanned: 100,
+            monthlyConfirmed: 250,
+            progress: 25,
+            goals: [goal],
+          },
+        ],
+        plans: [
+          {
+            id: "plan",
+            user_id: uid,
+            goal_id: gid,
+            month: `${m}-01`,
+            amount: 100,
+            share_authorized: true,
+          },
+        ],
+      },
+    }),
+  );
+  await page
+    .locator("nav")
+    .getByRole("button", { name: "Espacios compartidos", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Familia · Resumen de objetivos (PEN)" }),
+  ).toBeVisible();
+  await page
+    .locator("summary")
+    .filter({ hasText: "Detalle de Viaje familiar" })
+    .click();
+  await expect(
+    page.getByRole("progressbar", { name: "Avance financiero", exact: true }),
+  ).toHaveAttribute("aria-valuenow", "25");
+  await expect(
+    page.getByRole("progressbar", { name: "Tiempo transcurrido", exact: true }),
+  ).toHaveAttribute("aria-valuenow", "60");
+  await expect(
+    page.getByRole("heading", { name: "Historial de aportes confirmados" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Ingreso mensual previsto")).not.toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await expect
+    .poll(() =>
+      page
+        .locator(".sidebar")
+        .evaluate((el) => el.getBoundingClientRect().right),
+    )
+    .toBeLessThanOrEqual(0);
+  await page.screenshot({
+    path: "test-results/space-planning-mobile.png",
+    fullPage: true,
+  });
 });
 
 test("El reparto porcentual utiliza nombres y confirma un único lote", async ({

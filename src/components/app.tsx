@@ -56,7 +56,7 @@ import {
   formatMoney,
 } from "@/lib/api";
 import { Button } from "./ui/button";
-import { deadlineDistribution } from "@/lib/savings";
+import { SavingsOverview, SavingsPlanner } from "./savings-planner";
 import {
   RegisteredInvitations,
   InvitationInbox,
@@ -82,6 +82,7 @@ const nav = [
   { id: "calendar", label: "Pagos y calendario", icon: CalendarDays },
   { id: "budgets", label: "Presupuestos", icon: ChartNoAxesCombined },
   { id: "goals", label: "Objetivos de ahorro", icon: Target },
+  { id: "planner", label: "Planificador de ahorro", icon: CalendarDays },
   { id: "spaces", label: "Espacios compartidos", icon: Users },
 ];
 const statuses: Record<string, string> = {
@@ -2268,34 +2269,26 @@ export function App() {
                 Retirar reserva
               </Button>
             </div>
-            <section className="card" style={{ marginBottom: 20 }}>
-              <h2>Distribución sugerida por fecha de fin</h2>
-              <p className="detail">
-                Los objetivos más próximos reciben mayor porcentaje. Con tres
-                objetivos pendientes: 50%, 30% y 20%. Con otra cantidad se usan
-                pesos descendentes; los objetivos completados quedan fuera. Se
-                aplica a tu ahorro, en la moneda seleccionada, al confirmar la
-                distribución.
-              </p>
-              {deadlineDistribution(
-                data.goals ?? [],
-                data.allocations ?? [],
-                currency,
-              ).map((g) => (
-                <div className="list-row" key={g.id}>
-                  <span>
-                    {g.name} · {g.target_date}
-                  </span>
-                  <strong>{g.percentage.toFixed(2)}%</strong>
-                </div>
-              ))}
-              <Button
-                variant="outline"
-                onClick={() => open("distribution", { currency })}
-              >
-                Distribuir ahorro
-              </Button>
-            </section>
+            <div className="callout">
+              <div>
+                <h3>Planifica antes de aportar</h3>
+                <p>
+                  El motor calcula recomendaciones mensuales según fechas,
+                  saldos, prioridades, responsabilidades y tu presupuesto
+                  privado.
+                </p>
+                <Button variant="outline" onClick={() => navigate("planner")}>
+                  Abrir Planificador de ahorro
+                </Button>
+              </div>
+            </div>
+            <SavingsOverview
+              mode="goals"
+              currency={currency}
+              month={month}
+              data={data}
+              onContribute={(g) => open("allocations", { goal_id: g.id })}
+            />
             <div className="grid-3">
               {summary?.goals.map((g: Row) => (
                 <section className="card" key={g.id}>
@@ -2367,9 +2360,13 @@ export function App() {
                                 a.goal_id === g.id && a.user_id === m.user_id,
                             )
                             .reduce((s, a) => s + Number(a.amount), 0);
-                          const target =
-                            (Number(g.ideal_amount) * Number(m.percentage)) /
-                            100;
+                          const target = Number(
+                            g.participantTargets?.find(
+                              (p: Row) => p.user_id === m.user_id,
+                            )?.target_amount ??
+                              (Number(g.ideal_amount) * Number(m.percentage)) /
+                                100,
+                          );
                           return (
                             <p className="detail" key={m.user_id}>
                               {m.user_id === session.user.id
@@ -2461,6 +2458,26 @@ export function App() {
           </>
         )}
 
+        {tab === "planner" && (
+          <>
+            {heading(
+              "Planificador de ahorro",
+              "Presupuestos privados, recomendaciones mensuales y aportes con confirmación.",
+              "goals",
+              "Crear objetivo",
+            )}
+            {period}
+            <SavingsPlanner
+              currency={currency}
+              month={month}
+              data={data}
+              userId={session.user.id}
+              onChanged={load}
+              onContribute={(g) => open("allocations", { goal_id: g.id })}
+            />
+          </>
+        )}
+
         {tab === "spaces" && (
           <>
             {heading(
@@ -2469,6 +2486,14 @@ export function App() {
               "spaces",
               "Crear espacio",
             )}
+            {period}
+            <SavingsOverview
+              mode="spaces"
+              currency={currency}
+              month={month}
+              data={data}
+              onContribute={(g) => open("allocations", { goal_id: g.id })}
+            />
             <div className="callout">
               <ShieldCheck size={19} />
               <p>

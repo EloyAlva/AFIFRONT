@@ -5,7 +5,6 @@ import { z } from "zod";
 import { X } from "lucide-react";
 import { DateTime } from "luxon";
 import { api } from "@/lib/api";
-import { deadlineDistribution } from "@/lib/savings";
 import { Button } from "./ui/button";
 export type Row = Record<string, any>;
 type Field = {
@@ -407,6 +406,13 @@ export function ResourceForm({
         required: true,
       },
       {
+        key: "start_date",
+        label: "Fecha de inicio",
+        type: "date",
+        default: now.toISODate(),
+        required: true,
+      },
+      {
         key: "target_date",
         label: "Fecha objetivo",
         type: "date",
@@ -631,14 +637,21 @@ export function ResourceForm({
       "minimum_amount",
       "ideal_amount",
       "target_date",
+      "start_date",
       "priority",
     ],
   };
   const selected = (fields[resource] ?? []).filter(
     (f) =>
-      !initial._editId ||
-      resource === "transactions" ||
-      editFields[resource]?.includes(f.key),
+      (!initial._editId ||
+        resource === "transactions" ||
+        editFields[resource]?.includes(f.key)) &&
+      !(
+        resource === "goals" &&
+        initial._editId &&
+        f.key === "start_date" &&
+        !initial.start_date
+      ),
   );
   const ratioItems: [string, string][] =
     resource === "distribution"
@@ -863,36 +876,52 @@ export function ResourceForm({
                     {resource === "distribution" && (
                       <div style={{ marginBottom: 16 }}>
                         <p className="detail">
-                          Sugerencia por fecha de fin: con tres objetivos
-                          pendientes, 50%, 30% y 20%, del más próximo al más
-                          lejano. Puedes ajustar los porcentajes antes de
-                          confirmar.
+                          El backend calcula la sugerencia con saldos,
+                          vencimientos, responsabilidades y presupuestos
+                          futuros. Ingresa primero el importe del fondo. Puedes
+                          ajustar el reparto antes de confirmar; los redondeos
+                          sin asignar permanecen en el fondo.
                         </p>
                         <Button
                           type="button"
                           size="sm"
                           variant="outline"
-                          onClick={() => {
-                            const suggestion = deadlineDistribution(
-                              data.goals ?? [],
-                              data.allocations ?? [],
-                              currentCurrency,
-                            );
-                            setRatios({
-                              ...Object.fromEntries(
-                                ratioItems.map(([id]) => [id, "0"]),
-                              ),
-                              ...Object.fromEntries(
-                                suggestion.map((g) => [
-                                  g.id,
-                                  String(g.percentage),
-                                ]),
-                              ),
-                              unassigned: suggestion.length ? "0" : "100",
-                            });
+                          onClick={async () => {
+                            try {
+                              setLocalError("");
+                              const amount = Number(values.amount);
+                              if (!(amount > 0))
+                                throw new Error(
+                                  "Ingresa un importe mayor que cero para calcular el reparto.",
+                                );
+                              const suggestion = await api(
+                                `/savings/planner?currency=${currentCurrency}&month=${now.toFormat("yyyy-MM")}&fund_amount=${amount}`,
+                              );
+                              const result: Record<string, string> =
+                                Object.fromEntries(
+                                  ratioItems.map(([id]) => [id, "0"]),
+                                );
+                              let assigned = 0;
+                              for (const allocation of suggestion.schedule[0]
+                                .allocations) {
+                                const percentage = Math.floor(
+                                  (allocation.amount / amount) * 10000,
+                                );
+                                assigned += percentage;
+                                result[allocation.goal_id] = String(
+                                  percentage / 100,
+                                );
+                              }
+                              result.unassigned = String(
+                                (10000 - assigned) / 100,
+                              );
+                              setRatios(result);
+                            } catch (e) {
+                              setLocalError((e as Error).message);
+                            }
                           }}
                         >
-                          Sugerir por fecha de fin
+                          Calcular reparto dinámico
                         </Button>
                       </div>
                     )}
