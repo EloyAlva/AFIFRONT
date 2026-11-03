@@ -1565,6 +1565,98 @@ test("Objetivos compartidos muestran cuotas y consultan el reparto dinámico del
   ).toHaveValue("0.01");
 });
 
+test("Indicador mensual muestra importes y porcentajes del planificador y admite presupuesto cero", async ({
+  page,
+}) => {
+  await mock(page);
+  const m = now.slice(0, 7);
+  const next = new Date(
+    Date.UTC(Number(now.slice(0, 4)), Number(now.slice(5, 7)), 1),
+  )
+    .toISOString()
+    .slice(0, 7);
+  const goal = (id: string, name: string) => ({
+    id,
+    name,
+    deadline: `${next}-28`,
+    percentage: 100,
+    remaining: 1000,
+    monthlyRequired: 500,
+    accumulatedDeficit: 0,
+    participationMissing: false,
+    status: "behind",
+    feasible: false,
+    deficit: 400,
+  });
+  const base = {
+    monthlyIncome: 3000,
+    savingsPercentage: 20,
+    desired: 600,
+    financiallyAvailable: 600,
+    maximumSavings: 600,
+    essentialExpenses: 0,
+    pendingObligations: 0,
+    confirmed: 0,
+  };
+  await page.route("**/api/v1/savings/planner?*", (r) =>
+    r.fulfill({
+      json: {
+        startMonth: m,
+        assumption: "Presupuesto privado",
+        horizonLimited: false,
+        budgets: [
+          { ...base, month: m, amount: 600 },
+          { ...base, month: next, amount: 0 },
+        ],
+        schedule: [
+          {
+            month: m,
+            budget: 600,
+            assigned: 600,
+            unassigned: 0,
+            allocations: [
+              { goal_id: gid, amount: 420 },
+              { goal_id: "boda", amount: 180 },
+            ],
+          },
+          {
+            month: next,
+            budget: 0,
+            assigned: 0,
+            unassigned: 0,
+            allocations: [],
+          },
+        ],
+        goals: [goal(gid, "Viaje"), goal("boda", "Boda")],
+        confirmedContributions: [],
+        conflicts: [],
+      },
+    }),
+  );
+  await page
+    .locator("nav")
+    .getByRole("button", { name: "Resumen general", exact: true })
+    .click();
+  let indicator = page.getByRole("region", {
+    name: "Indicador de ahorro y asignación mensual",
+  });
+  await expect(indicator.getByText(/600\.00/).first()).toBeVisible();
+  await expect(indicator.getByText(/420\.00/).first()).toBeVisible();
+  await expect(indicator.getByText(/180\.00/).first()).toBeVisible();
+  await expect(indicator.getByText(/70\.00% de asignación/)).toBeVisible();
+  await expect(indicator.getByText(/30\.00% de asignación/)).toBeVisible();
+  await page
+    .locator("nav")
+    .getByRole("button", { name: "Planificador de ahorro", exact: true })
+    .click();
+  await page.getByLabel("Mes del calendario").selectOption(next);
+  indicator = page.getByRole("region", {
+    name: "Indicador de ahorro y asignación mensual",
+  });
+  await expect(indicator.getByText(/0\.00% de asignación/)).toHaveCount(2);
+  await expect(indicator).not.toContainText("NaN");
+});
+
 test("Planificador guarda planes con autorización explícita sin realizar movimientos", async ({
   page,
 }) => {

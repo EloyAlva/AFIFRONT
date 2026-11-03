@@ -81,6 +81,164 @@ function Numbers({
     </div>
   );
 }
+function MonthlyAllocationIndicator({
+  plan,
+  month,
+  currency,
+}: {
+  plan: Row;
+  month: string;
+  currency: string;
+}) {
+  const row = plan.schedule.find((s: Row) => s.month === month);
+  const budget = plan.budgets.find((b: Row) => b.month === month);
+  if (!row || !budget) return null;
+  const required =
+    Math.round(
+      plan.goals
+        .filter(
+          (g: Row) =>
+            !g.participationMissing &&
+            g.status !== "completed" &&
+            g.status !== "overdue",
+        )
+        .reduce(
+          (sum: number, g: Row) => sum + Number(g.monthlyRequired ?? 0),
+          0,
+        ) * 100,
+    ) / 100;
+  return (
+    <section
+      className="card"
+      aria-label="Indicador de ahorro y asignación mensual"
+      style={{ margin: "20px 0" }}
+    >
+      <h2>Cuánto ahorrar y a qué objetivos · {month}</h2>
+      <Numbers
+        currency={currency}
+        values={[
+          ...(month === plan.startMonth
+            ? [
+                ["Necesidad mensual pendiente de tus objetivos", required] as [
+                  string,
+                  number,
+                ],
+              ]
+            : []),
+          [
+            "Ahorro mensual recomendado",
+            Math.round((Number(row.budget) + Number(budget.confirmed)) * 100) /
+              100,
+          ],
+          ["Ya aportado este mes", Number(budget.confirmed)],
+          ["Pendiente recomendado este mes", Number(row.budget)],
+        ]}
+      />
+      {month === plan.startMonth && required > Number(row.budget) && (
+        <p className="negative">
+          Tus objetivos requieren más ahorro mensual del que permite el
+          presupuesto recomendado. Revisa los déficits, las fechas y las metas
+          en el planificador.
+        </p>
+      )}
+      <p className="detail">
+        El importe recomendado respeta tu porcentaje de ahorro y tu capacidad
+        disponible. El porcentaje de cada objetivo se calcula sobre el importe
+        pendiente recomendado de este mes, según la distribución del
+        planificador.
+      </p>
+      <div className="grid-2">
+        {plan.goals.map((g: Row) => {
+          const amount = Number(
+            row.allocations.find((a: Row) => a.goal_id === g.id)?.amount ?? 0,
+          );
+          const confirmed = (plan.confirmedContributions ?? [])
+            .filter((a: Row) => a.goal_id === g.id && a.month === month)
+            .reduce((sum: number, a: Row) => sum + Number(a.amount), 0);
+          const percentage = row.budget > 0 ? (amount / row.budget) * 100 : 0;
+          return (
+            <div
+              key={g.id}
+              style={{
+                padding: "12px 0",
+                borderBottom: "1px solid #e2e8f0",
+                minWidth: 0,
+              }}
+            >
+              <h3>{g.name}</h3>
+              <p>
+                <strong>{formatMoney(amount, currency)}</strong> por aportar ·{" "}
+                {percentage.toFixed(2)}% de asignación
+              </p>
+              <Meter
+                label={`Asignación mensual de ${g.name}`}
+                value={percentage}
+              />
+              <p className="detail">
+                Ya aportado: {formatMoney(confirmed, currency)} · Total del mes
+                previsto:{" "}
+                {formatMoney(
+                  Math.round((amount + confirmed) * 100) / 100,
+                  currency,
+                )}
+                .
+              </p>
+              {g.participationMissing && (
+                <small>
+                  Falta definir tu responsabilidad en este objetivo.
+                </small>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {!plan.goals.length && (
+        <p className="detail">Crea objetivos para distribuir tu ahorro.</p>
+      )}
+      <p className="detail" style={{ marginTop: 16 }}>
+        Sin asignar a objetivos: {formatMoney(Number(row.unassigned), currency)}{" "}
+        ({(row.budget > 0 ? (row.unassigned / row.budget) * 100 : 0).toFixed(2)}
+        %). Los porcentajes mostrados se redondean; los importes del
+        planificador son los que se aplican.
+      </p>
+      <small>
+        Es una recomendación. Los aportes aumentan el progreso únicamente cuando
+        los confirmas. Si editas el reparto, guarda el plan para actualizar este
+        indicador.
+      </small>
+    </section>
+  );
+}
+
+export function MonthlySavingsIndicator({
+  currency,
+  month,
+  data,
+}: {
+  currency: string;
+  month: string;
+  data: Record<string, Row[]>;
+}) {
+  const { value: plan, error } = usePlanning(
+    `/savings/planner?currency=${currency}&month=${month}`,
+    data,
+  );
+  if (error)
+    return (
+      <p className="detail">
+        El indicador de asignación mensual estará disponible cuando se pueda
+        cargar el planificador.
+      </p>
+    );
+  if (!plan?.schedule || !plan?.budgets || !plan?.goals) return null;
+  return (
+    <MonthlyAllocationIndicator
+      plan={plan}
+      month={plan.startMonth}
+      currency={currency}
+    />
+  );
+}
 function GoalDetail({
   goal,
   plans,
@@ -503,6 +661,11 @@ export function SavingsPlanner({
             ["Presupuesto pendiente recomendado", row.budget],
             ["Sugerido a objetivos", row.assigned],
           ]}
+        />
+        <MonthlyAllocationIndicator
+          plan={plan}
+          month={selected}
+          currency={currency}
         />
         <p className="detail">
           Puedes modificar los importes pendientes. Al guardar, se incluyen los

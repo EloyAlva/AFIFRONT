@@ -56,7 +56,11 @@ import {
   formatMoney,
 } from "@/lib/api";
 import { Button } from "./ui/button";
-import { SavingsOverview, SavingsPlanner } from "./savings-planner";
+import {
+  SavingsOverview,
+  SavingsPlanner,
+  MonthlySavingsIndicator,
+} from "./savings-planner";
 import {
   RegisteredInvitations,
   InvitationInbox,
@@ -1178,6 +1182,11 @@ export function App() {
                       }
                     />
                   </div>
+                  <MonthlySavingsIndicator
+                    currency={currency}
+                    month={month}
+                    data={data}
+                  />
                   {summary.savingsIndicator && (
                     <div className="callout">
                       <Target size={19} />
@@ -2288,6 +2297,11 @@ export function App() {
               month={month}
               data={data}
               onContribute={(g) => open("allocations", { goal_id: g.id })}
+            />
+            <MonthlySavingsIndicator
+              currency={currency}
+              month={month}
+              data={data}
             />
             <div className="grid-3">
               {summary?.goals.map((g: Row) => (
