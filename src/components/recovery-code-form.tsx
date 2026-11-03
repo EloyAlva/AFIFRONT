@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Eye, EyeOff } from "lucide-react";
 import { newPassword } from "@/lib/password";
+import { publicRequest } from "@/lib/backend";
 import { Button } from "./ui/button";
 
 const schema = z
@@ -60,20 +61,7 @@ export function RecoveryCodeForm({
         onSubmit={handleSubmit(async (values) => {
           setError("");
           try {
-            const response = await fetch(
-              (process.env.NEXT_PUBLIC_API_URL ??
-                "http://localhost:4000/api/v1") + "/auth/password-recovery",
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(values),
-              },
-            );
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok)
-              throw Error(
-                result.error?.message ?? "No se pudo cambiar la contraseña.",
-              );
+            await publicRequest("/auth/password-recovery", "POST", values);
             reset();
             setShow(false);
             onSuccess(values.username);

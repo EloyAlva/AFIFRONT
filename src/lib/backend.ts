@@ -1,6 +1,7 @@
-export const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1"
-).replace(/\/+$/, "");
+import { normalizeBackendUrl } from "./backend-url";
+export const API_URL = normalizeBackendUrl(
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1",
+);
 
 /** All browser requests go to AFIBACK; Supabase and AI credentials are server-only. */
 export async function publicRequest<T = any>(

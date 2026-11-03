@@ -14,6 +14,12 @@ Abre `http://localhost:3000`.
 
 - `NEXT_PUBLIC_API_URL`: URL pública del backend, incluyendo `/api/v1`.
 
+Para el despliegue actual: `NEXT_PUBLIC_API_URL=https://afiback.vercel.app/api/v1`.
+Usa el dominio estable de producción, no un hostname temporal de Preview.
+Si omites el protocolo o el prefijo de API, el cliente los completa; todas las
+rutas, incluidas las de recuperación, comparten esa normalización.
+Después de cambiar el valor en Vercel, crea un nuevo despliegue del frontend.
+
 Esta es la única variable necesaria. No configures claves de Supabase, credenciales de PostgreSQL ni claves de IA en este proyecto. En desarrollo se usa `http://localhost:4000/api/v1` si no se define la URL. No hay modo demo que simule persistencia financiera.
 
 Aplica primero las migraciones del backend y configura las URL de Auth allí. La aplicación admite registro, confirmación por correo, inicio/cierre de sesión, recuperación y actualización de contraseña. El perfil inicial usa PEN y America/Lima. El navegador conserva la sesión en `afi-auth-session-v1` y solicita su renovación al backend, serializada entre pestañas. Solo se guardan los tokens de sesión y un resumen del usuario; nunca la contraseña. No hay cookies SSR ni datos financieros prerenderizados. Después de esta actualización, los usuarios con sesiones del cliente anterior deben volver a iniciar sesión.

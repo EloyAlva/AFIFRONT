@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { api } from "@/lib/api";
+import { publicRequest as backendRequest } from "@/lib/backend";
 import { newPassword } from "@/lib/password";
 import { Button } from "./ui/button";
 
@@ -30,18 +31,7 @@ const questionSchema = z
     { path: ["answerConfirmation"], message: "Las respuestas no coinciden." },
   );
 async function publicRequest(path: string, body: unknown) {
-  const response = await fetch(
-    (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1") + path,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  );
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw Error(result.error?.message ?? "No se pudo completar la operación.");
-  return result;
+  return backendRequest(path, "POST", body);
 }
 
 export function SecurityQuestionSetup({
