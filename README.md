@@ -1,6 +1,6 @@
 # AFI Frontend
 
-Next.js App Router, React, TypeScript, Tailwind CSS, componentes shadcn/ui (Button/Radix/CVA), Lucide, React Hook Form, Zod, Recharts y Luxon. Repositorio independiente: toda operación financiera se realiza por HTTP contra el backend; Supabase se usa directamente **solo para Auth**.
+Next.js App Router, React, TypeScript, Tailwind CSS, componentes shadcn/ui (Button/Radix/CVA), Lucide, React Hook Form, Zod, Recharts y Luxon. Repositorio independiente: todas las operaciones, incluida la autenticación, se realizan por HTTP contra AFIBACK. El navegador no consulta Supabase ni proveedores de IA directamente y no incluye su SDK.
 
 ## Desarrollo
 
@@ -13,15 +13,12 @@ npm.cmd run dev
 Abre `http://localhost:3000`.
 
 - `NEXT_PUBLIC_API_URL`: URL pública del backend, incluyendo `/api/v1`.
-- `NEXT_PUBLIC_SUPABASE_URL`: URL del proyecto Supabase.
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: clave pública anon.
-- `NEXT_PUBLIC_APP_NAME`: nombre disponible para la configuración de despliegue; marca visible AFI.
 
-No configures service role, credenciales de PostgreSQL ni claves de IA en este proyecto. Si faltan las variables públicas, la pantalla inicial explica cómo configurarlas. No hay modo demo que simule persistencia financiera.
+Esta es la única variable necesaria. No configures claves de Supabase, credenciales de PostgreSQL ni claves de IA en este proyecto. En desarrollo se usa `http://localhost:4000/api/v1` si no se define la URL. No hay modo demo que simule persistencia financiera.
 
-Aplica primero las migraciones del backend y configura las URL de Auth. La aplicación admite registro, confirmación por correo, inicio/cierre de sesión, recuperación y actualización de contraseña. El perfil inicial usa PEN y America/Lima. La sesión de Supabase se conserva y renueva en el navegador; no hay cookies SSR ni datos financieros prerenderizados.
+Aplica primero las migraciones del backend y configura las URL de Auth allí. La aplicación admite registro, confirmación por correo, inicio/cierre de sesión, recuperación y actualización de contraseña. El perfil inicial usa PEN y America/Lima. El navegador conserva la sesión en `afi-auth-session-v1` y solicita su renovación al backend, serializada entre pestañas. Solo se guardan los tokens de sesión y un resumen del usuario; nunca la contraseña. No hay cookies SSR ni datos financieros prerenderizados. Después de esta actualización, los usuarios con sesiones del cliente anterior deben volver a iniciar sesión.
 
-El inicio de sesión y la recuperación aceptan usuarios cortos: `mramirez` se envía a Supabase como `mramirez@afi.com` y `ealva` como `ealva@afi.com`. Se eliminan espacios externos y se normaliza a minúsculas. También se admiten correos completos, conservando su dominio. El registro continúa solicitando un correo completo. El frontend no guarda ni comprueba contraseñas por su cuenta.
+El inicio de sesión y la recuperación aceptan usuarios cortos: `mramirez` se envía al backend como `mramirez@afi.com` y `ealva` como `ealva@afi.com`. El backend también normaliza y valida la identidad. Se admiten correos completos, conservando su dominio. El registro continúa solicitando un correo completo y al menos 12 caracteres de contraseña. El frontend no guarda ni comprueba contraseñas por su cuenta.
 
 ## Cambiar o recuperar contraseña
 
@@ -84,6 +81,6 @@ Playwright arranca en puerto 3100 con variables de prueba e intercepta HTTP/Auth
 
 ## Vercel independiente
 
-Importa **solo esta carpeta/repositorio** en Vercel; framework Next.js, build `npm run build`, dependencias `npm ci`, salida predeterminada. Configura las cuatro variables públicas antes del build. Usa la URL HTTPS del backend en `NEXT_PUBLIC_API_URL`; permite el dominio frontend en su `FRONTEND_URL`. Cambiar variables públicas requiere reconstruir el frontend. Agrega el dominio Vercel y dominio final a las Redirect URLs de Supabase Auth.
+Importa **solo esta carpeta/repositorio** en Vercel; framework Next.js, build `npm run build`, dependencias `npm ci`, salida predeterminada. Configura únicamente `NEXT_PUBLIC_API_URL=https://TU-BACKEND/api/v1` antes del build. Puedes eliminar las antiguas variables `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_NAME` y `BACKED_URL`: ya no se usan. Permite el dominio frontend en `FRONTEND_URL` del backend. Cambiar la variable pública requiere reconstruir el frontend. Agrega el dominio Vercel y dominio final a las Redirect URLs de Supabase Auth, configuradas desde el backend/proyecto Supabase.
 
 No hay despliegue automático ejecutado ni cuenta Vercel/Supabase vinculada. Consulta las reglas financieras y límites del backend antes de usar los gráficos como reporte contable.

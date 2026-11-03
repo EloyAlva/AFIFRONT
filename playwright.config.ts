@@ -14,8 +14,6 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 60000,
     env: {
-      NEXT_PUBLIC_SUPABASE_URL: "https://afi-test.supabase.co",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-public-key",
       NEXT_PUBLIC_API_URL: "http://localhost:4000/api/v1",
     },
   },

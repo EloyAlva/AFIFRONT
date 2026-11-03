@@ -1,5 +1,182 @@
 ﻿import { test, expect, type Page } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  page.on("request", (request) => {
+    expect(
+      new URL(request.url()).hostname,
+      "El navegador debe consultar AFIBACK, no Supabase",
+    ).not.toMatch(/supabase\.(co|in)$/);
+  });
+});
+
+test("Auth centralizada: login, persistencia y cierre consultan solo al backend", async ({
+  page,
+}) => {
+  await mock(page);
+  await page
+    .getByRole("button", { name: "Cerrar sesión", exact: true })
+    .click();
+  let logins = 0;
+  await page.route("http://localhost:4000/api/v1/auth/login", async (r) => {
+    logins++;
+    expect(r.request().postDataJSON()).toEqual({
+      email: "ealva@afi.com",
+      password: "LoginPassword.2026!",
+    });
+    await r.fulfill({
+      json: {
+        session: {
+          access_token: "backend-access",
+          refresh_token: "backend-refresh",
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          user: { id: uid, email: "ealva@afi.com" },
+        },
+      },
+    });
+  });
+  await page
+    .getByLabel("Usuario o correo electrónico", { exact: true })
+    .fill("ealva");
+  await page
+    .getByLabel("Contraseña", { exact: true })
+    .fill("LoginPassword.2026!");
+  await page
+    .getByRole("button", { name: "Iniciar sesión", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Hablemos de tus finanzas" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Hablemos de tus finanzas" }),
+  ).toBeVisible();
+  expect(logins).toBe(1);
+  const logout = page.waitForRequest((r) => r.url().endsWith("/auth/logout"));
+  await page
+    .getByRole("button", { name: "Cerrar sesión", exact: true })
+    .click();
+  expect((await logout).headers().authorization).toBe("Bearer backend-access");
+  await expect(
+    page.getByRole("button", { name: "Iniciar sesión", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("afi-auth-session-v1")),
+    )
+    .toBeNull();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Iniciar sesión", exact: true }),
+  ).toBeVisible();
+});
+
+test("Auth centralizada: una sola renovación sirve a todas las consultas concurrentes", async ({
+  page,
+}) => {
+  await mock(page);
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("afi-auth-session-v1")!);
+    s.expires_at = Math.floor(Date.now() / 1000) - 1;
+    localStorage.setItem("afi-auth-session-v1", JSON.stringify(s));
+  });
+  let refreshes = 0;
+  await page.route("http://localhost:4000/api/v1/auth/refresh", async (r) => {
+    refreshes++;
+    expect(r.request().postDataJSON()).toEqual({
+      refresh_token: "test-refresh",
+    });
+    await r.fulfill({
+      json: {
+        session: {
+          access_token: "renewed-access",
+          refresh_token: "rotated-refresh",
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          user: { id: uid, email: "one@example.com" },
+        },
+      },
+    });
+  });
+  const request = page.waitForRequest(
+    (r) =>
+      r.url().includes("/accounts?") &&
+      r.headers().authorization === "Bearer renewed-access",
+  );
+  await page.reload();
+  await request;
+  await expect(
+    page.getByRole("heading", { name: "Hablemos de tus finanzas" }),
+  ).toBeVisible();
+  expect(refreshes).toBe(1);
+  expect(
+    await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("afi-auth-session-v1")!).refresh_token,
+    ),
+  ).toBe("rotated-refresh");
+});
+
+test("Auth centralizada: refresh rechazado cierra la sesión sin consultar finanzas", async ({
+  page,
+}) => {
+  await mock(page);
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("afi-auth-session-v1")!);
+    s.expires_at = 1;
+    localStorage.setItem("afi-auth-session-v1", JSON.stringify(s));
+  });
+  await page.route("http://localhost:4000/api/v1/auth/refresh", (r) =>
+    r.fulfill({
+      status: 401,
+      json: { error: { code: "bad_refresh_token", message: "Sesión vencida" } },
+    }),
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Iniciar sesión", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("afi-auth-session-v1")),
+  ).toBeNull();
+});
+
+test("Auth centralizada: registro envía nombre y contraseña al backend", async ({
+  page,
+}) => {
+  await mock(page);
+  await page
+    .getByRole("button", { name: "Cerrar sesión", exact: true })
+    .click();
+  await page.route("http://localhost:4000/api/v1/auth/register", async (r) => {
+    expect(r.request().postDataJSON()).toEqual({
+      email: "new@example.com",
+      password: "RegisterPassword.2026!",
+      display_name: "Nuevo Usuario",
+      redirect_to: "http://localhost:3100/",
+    });
+    await r.fulfill({ json: { session: null } });
+  });
+  await page
+    .getByRole("button", { name: "Crear una cuenta", exact: true })
+    .click();
+  await page.getByLabel("Nombre", { exact: true }).fill("Nuevo Usuario");
+  await page
+    .getByLabel("Correo electrónico", { exact: true })
+    .fill("new@example.com");
+  await page
+    .getByLabel("Contraseña", { exact: true })
+    .fill("RegisterPassword.2026!");
+  await page.getByRole("button", { name: "Crear cuenta", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Cuenta creada. Revisa tu correo para confirmar tu dirección.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("afi-auth-session-v1")),
+  ).toBeNull();
+});
+
 test("Invitaciones: buscar usuarios registrados y enviar", async ({ page }) => {
   await mock(page);
   await page.route("http://localhost:4000/api/v1/spaces?**", (r) =>
@@ -439,13 +616,16 @@ for (const username of ["mramirez", "ealva"]) {
     page,
   }) => {
     await page.route(
-      "https://afi-test.supabase.co/auth/v1/token?*",
+      "http://localhost:4000/api/v1/auth/login",
       async (route) => {
         await route.fulfill({
           status: 400,
           json: {
-            error_code: "invalid_credentials",
-            msg: "Respuesta de Auth simulada para comprobar el correo enviado",
+            error: {
+              code: "invalid_credentials",
+              message:
+                "Respuesta de Auth simulada para comprobar el correo enviado",
+            },
           },
         });
       },
@@ -458,7 +638,7 @@ for (const username of ["mramirez", "ealva"]) {
       .getByLabel("Contraseña", { exact: true })
       .fill("OnlyTest.Login-2026!");
     const request = page.waitForRequest(
-      (r) => r.url().includes("/auth/v1/token") && r.method() === "POST",
+      (r) => r.url().includes("/auth/login") && r.method() === "POST",
     );
     await page
       .getByRole("button", { name: "Iniciar sesión", exact: true })
@@ -542,9 +722,11 @@ const summary = {
 async function mock(page: Page) {
   await page.addInitScript(
     ({ uid }) => {
+      if (sessionStorage.getItem("afi-test-seeded")) return;
+      sessionStorage.setItem("afi-test-seeded", "true");
       const expires = Math.floor(Date.now() / 1000) + 3600;
       localStorage.setItem(
-        "sb-afi-test-auth-token",
+        "afi-auth-session-v1",
         JSON.stringify({
           access_token: "test-jwt",
           refresh_token: "test-refresh",
@@ -565,16 +747,6 @@ async function mock(page: Page) {
     },
     { uid },
   );
-  await page.route("https://afi-test.supabase.co/**", (route) =>
-    route.fulfill({
-      json: {
-        id: uid,
-        email: "one@example.com",
-        user_metadata: {},
-        app_metadata: {},
-      },
-    }),
-  );
   await page.route("http://localhost:4000/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const resource = url.pathname.split("/api/v1/")[1];
@@ -587,6 +759,18 @@ async function mock(page: Page) {
           "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS",
         },
       });
+    if (resource === "auth/session")
+      return route.fulfill({
+        json: {
+          session: {
+            ...route.request().postDataJSON(),
+            expires_at: Math.floor(Date.now() / 1000) + 3600,
+            user: { id: uid, email: "one@example.com" },
+          },
+        },
+      });
+    if (resource === "auth/reauthenticate")
+      return route.fulfill({ json: { ok: true } });
     if (resource === "dashboard") return route.fulfill({ json: summary });
     if (route.request().method() !== "GET")
       return route.fulfill({ json: { id: gid, ok: true } });
@@ -621,7 +805,7 @@ test("Cambiar contraseña valida confirmación y actualiza con la clave actual",
   });
   let updates = 0;
   await page.route(
-    "https://afi-test.supabase.co/auth/v1/user",
+    "http://localhost:4000/api/v1/auth/password",
     async (route) => {
       if (route.request().method() === "PUT") updates++;
       await route.fulfill({
@@ -659,7 +843,7 @@ test("Cambiar contraseña valida confirmación y actualiza con la clave actual",
     form.getByLabel("Nueva contraseña", { exact: true }),
   ).toHaveAttribute("type", "text");
   const request = page.waitForRequest(
-    (r) => r.url().endsWith("/auth/v1/user") && r.method() === "PUT",
+    (r) => r.url().endsWith("/auth/password") && r.method() === "PUT",
   );
   await form
     .getByRole("button", { name: "Cambiar contraseña", exact: true })
@@ -688,13 +872,14 @@ test("Una clave actual incorrecta no muestra éxito y permite corregirla", async
   await page
     .getByRole("button", { name: "Configuración", exact: true })
     .click();
-  await page.route("https://afi-test.supabase.co/auth/v1/user", (r) =>
+  await page.route("http://localhost:4000/api/v1/auth/password", (r) =>
     r.fulfill({
       status: 400,
       json: {
-        code: "invalid_password",
-        error_code: "invalid_password",
-        msg: "Current password is incorrect",
+        error: {
+          code: "invalid_password",
+          message: "Current password is incorrect",
+        },
       },
     }),
   );
@@ -729,7 +914,7 @@ test("Recuperación admite usuario corto y no cambia contraseñas al enviar el e
   page,
 }) => {
   let updates = 0;
-  await page.route("https://afi-test.supabase.co/**", async (route) => {
+  await page.route("http://localhost:4000/api/v1/auth/**", async (route) => {
     if (route.request().method() === "PUT") updates++;
     await route.fulfill({ json: {} });
   });
@@ -744,9 +929,7 @@ test("Recuperación admite usuario corto y no cambia contraseñas al enviar el e
   await page
     .getByLabel("Usuario o correo electrónico", { exact: true })
     .fill("ealva");
-  const request = page.waitForRequest((r) =>
-    r.url().includes("/auth/v1/recover"),
-  );
+  const request = page.waitForRequest((r) => r.url().includes("/auth/recover"));
   await page
     .getByRole("button", { name: "Enviar enlace", exact: true })
     .click();
@@ -795,7 +978,7 @@ test("Un enlace de recuperación permite confirmar una nueva clave sin la anteri
     .getByLabel("Confirmar nueva contraseña", { exact: true })
     .fill("RecoveryPassword.2026!");
   const request = page.waitForRequest(
-    (r) => r.url().endsWith("/auth/v1/user") && r.method() === "PUT",
+    (r) => r.url().endsWith("/auth/password") && r.method() === "PUT",
   );
   await form
     .getByRole("button", { name: "Guardar nueva contraseña", exact: true })
@@ -934,14 +1117,15 @@ test("La reautenticación permite enviar y confirmar el código de seguridad", a
     .getByRole("button", { name: "Configuración", exact: true })
     .click();
   let attempts = 0;
-  await page.route("https://afi-test.supabase.co/auth/v1/user", async (r) => {
+  await page.route("http://localhost:4000/api/v1/auth/password", async (r) => {
     if (r.request().method() === "PUT" && ++attempts === 1)
       return r.fulfill({
         status: 400,
         json: {
-          error_code: "reauthentication_needed",
-          code: "reauthentication_needed",
-          msg: "Reauthentication needed",
+          error: {
+            code: "reauthentication_needed",
+            message: "Reauthentication needed",
+          },
         },
       });
     await r.fulfill({
@@ -974,7 +1158,7 @@ test("La reautenticación permite enviar y confirmar el código de seguridad", a
     form.getByLabel("Código de verificación", { exact: true }),
   ).toBeVisible();
   const codeRequest = page.waitForRequest((r) =>
-    r.url().includes("/auth/v1/reauthenticate"),
+    r.url().includes("/auth/reauthenticate"),
   );
   await form
     .getByRole("button", { name: "Enviar código de verificación", exact: true })
@@ -984,7 +1168,7 @@ test("La reautenticación permite enviar y confirmar el código de seguridad", a
     .getByLabel("Código de verificación", { exact: true })
     .fill("123456");
   const update = page.waitForRequest(
-    (r) => r.url().endsWith("/auth/v1/user") && r.method() === "PUT",
+    (r) => r.url().endsWith("/auth/password") && r.method() === "PUT",
   );
   await form
     .getByRole("button", { name: "Cambiar contraseña", exact: true })

@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
+import type { Session } from "@/lib/auth";
 import { DateTime } from "luxon";
 import {
   ArrowDownLeft,
@@ -251,12 +251,11 @@ function AuthScreen({
           </p>
           {!configured ? (
             <div className="config-box">
-              <h3>Conecta tu proyecto Supabase</h3>
+              <h3>Conecta el backend de AFI</h3>
               <p style={{ margin: "12px 0" }}>
                 Copia <code>.env.example</code> a <code>.env.local</code>,
-                completa la URL y clave pública de Supabase y reinicia el
-                frontend. Aplica las migraciones del backend antes de
-                registrarte.
+                configura NEXT_PUBLIC_API_URL con la dirección de tu backend y
+                reinicia el frontend.
               </p>
               <small>
                 No se usan datos ficticios ni credenciales de ejemplo.
@@ -387,13 +386,17 @@ function AuthScreen({
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           required
-                          minLength={8}
+                          minLength={mode === "register" ? 12 : 8}
                           autoComplete={
                             mode === "login"
                               ? "current-password"
                               : "new-password"
                           }
-                          placeholder="Mínimo 8 caracteres"
+                          placeholder={
+                            mode === "register"
+                              ? "Mínimo 12 caracteres"
+                              : "Tu contraseña"
+                          }
                         />
                       </label>
                     )}
@@ -544,7 +547,8 @@ export function App() {
     }
     auth()
       .auth.getSession()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) setAuthNotice(error.message);
         setSession(data.session);
         setAuthLoading(false);
       });
