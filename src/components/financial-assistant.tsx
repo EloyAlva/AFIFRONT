@@ -50,7 +50,7 @@ export function FinancialAssistant({
   userId: string;
   loading: boolean;
   onRefresh: () => void;
-  onManual: () => void;
+  onManual: (initial?: Row) => void;
   onAccounts: () => void;
   onCategories: () => void;
 }) {
@@ -218,6 +218,27 @@ export function FinancialAssistant({
     setEditing(false);
     prepared.current = null;
     composer.current?.focus();
+  };
+  const payWithCredit = () => {
+    if (!draft || busy || uncertain) return;
+    onManual({
+      type: "expense",
+      funding_source: "credit_card",
+      amount: draft.amount,
+      currency: draft.currency,
+      description: draft.description,
+      category_id: draft.category_id,
+      occurred_at: draft.date + "T12:00",
+    });
+    setDraft(null);
+    setError("");
+    prepared.current = null;
+    add([
+      {
+        role: "assistant",
+        text: "Completa la tarjeta y las cuotas en el formulario y confirma la compra. El gasto se cargará al crédito de la tarjeta.",
+      },
+    ]);
   };
   const confirm = async () => {
     if (sending.current || !draft || done) return;
@@ -427,7 +448,7 @@ export function FinancialAssistant({
             Cuéntame tu ingreso o gasto. Te guiaré paso a paso para registrarlo.
           </p>
         </div>
-        <Button variant="outline" onClick={onManual}>
+        <Button variant="outline" onClick={() => onManual()}>
           <Wallet size={15} />
           Registro manual
         </Button>
@@ -540,6 +561,11 @@ export function FinancialAssistant({
               )}
               {step === "account" && (
                 <div className="row" style={{ flexWrap: "wrap" }}>
+                  {draft.type === "expense" && (
+                    <Button variant="outline" onClick={payWithCredit}>
+                      Pagar con tarjeta de crédito
+                    </Button>
+                  )}
                   {!options.length && (
                     <Button variant="outline" onClick={onAccounts}>
                       Ir a Mis cuentas
@@ -807,6 +833,15 @@ export function FinancialAssistant({
                         ? "Reintentar registro"
                         : "Confirmar y registrar"}
                     </Button>
+                    {draft.type === "expense" && (
+                      <Button
+                        variant="outline"
+                        disabled={busy || uncertain}
+                        onClick={payWithCredit}
+                      >
+                        Pagar con tarjeta de crédito
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       disabled={busy || uncertain}

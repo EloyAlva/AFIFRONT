@@ -41,6 +41,14 @@ Configura SMTP y las Redirect URLs de Supabase para permitir el origen de la apl
 
 ## Uso
 
+### Gastos con cuenta o tarjeta de crédito
+
+Al registrar un gasto nuevo, **Pagar con** permite elegir **Cuenta / efectivo** o **Tarjeta de crédito**. Con crédito se elige una tarjeta activa de la misma moneda y el número de cuotas (1 a 120). Se guarda una compra mediante `/purchases`, con clave de idempotencia, sin crear un gasto de efectivo adicional. La compra aumenta la deuda de la tarjeta y se incluye en los gastos e indicadores existentes; el pago posterior de la tarjeta no vuelve a contar como gasto.
+
+En el asistente, **Pagar con tarjeta de crédito** abre el formulario conservando importe, descripción, moneda, categoría y fecha para revisar y confirmar. También está disponible al revisar un gasto, antes de confirmarlo o tras un rechazo por saldo insuficiente. Si el resultado de una solicitud anterior es incierto, primero debe comprobarse mediante el reintento existente para evitar duplicaciones.
+
+Para gastos pagados desde una cuenta se mantiene la validación de saldo. El mensaje en español indica que se revise el saldo inicial y los ingresos reales, se elija otra cuenta o se use crédito si corresponde. La aplicación no inventa ingresos ni permite descontar dinero inexistente.
+
 ### Objetivos, participación y meta mensual de ahorro
 
 Los espacios agrupan personas y objetivos; no tienen importe. Cada objetivo define su importe total, moneda y fecha de fin. En un objetivo compartido, el administrador puede abrir **Definir aportes por persona**: los porcentajes suman 100% y cada participante muestra su importe esperado, sus aportes confirmados y el saldo pendiente. Estos porcentajes pertenecen a ese objetivo.

@@ -2689,7 +2689,7 @@ export function App() {
             data={data}
             loading={loading}
             onRefresh={() => void load()}
-            onManual={() => open("transactions")}
+            onManual={(initial) => open("transactions", initial)}
             onAccounts={() => navigate("accounts")}
             onCategories={() => navigate("settings")}
           />

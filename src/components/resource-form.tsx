@@ -15,6 +15,9 @@ type Field = {
   required?: boolean;
   default?: any;
   full?: boolean;
+  min?: number;
+  max?: number;
+  step?: string;
 };
 const currencies: [string, string][] = [
   ["PEN", "Soles · PEN"],
@@ -85,9 +88,18 @@ export function ResourceForm({
   const dialog = useRef<HTMLDivElement>(null);
   const values = watch();
   const type = values.type ?? initial.type ?? "expense";
+  const creditExpense =
+    resource === "transactions" &&
+    type === "expense" &&
+    !ai &&
+    !initial._editId &&
+    (values.funding_source ?? initial.funding_source) === "credit_card";
   const options = (name: string): [string, string][] =>
     (data[name] ?? []).map((r) => [r.id, r.name ?? r.display_name ?? r.id]);
   const currentCurrency = values.currency ?? initial.currency ?? "PEN";
+  useEffect(() => {
+    setLocalError("");
+  }, [creditExpense, currentCurrency, type]);
   const accountOptions: [string, string][] = (data.accounts ?? [])
     .filter((r) => r.active && r.currency === currentCurrency)
     .map((r) => [r.id, r.name]);
@@ -555,7 +567,45 @@ export function ResourceForm({
         default: now.toFormat("yyyy-MM-dd'T'HH:mm"),
         required: true,
       },
-      ...(["income"].includes(type)
+      ...(type === "expense" && !ai && !initial._editId
+        ? [
+            {
+              key: "funding_source",
+              label: "Pagar con",
+              type: "select",
+              options: [
+                ["account", "Cuenta / efectivo"],
+                ["credit_card", "Tarjeta de crédito"],
+              ] as [string, string][],
+              default: "account",
+              required: true,
+            },
+          ]
+        : []),
+      ...(creditExpense
+        ? [
+            {
+              key: "card_id",
+              label: "Tarjeta de crédito",
+              type: "select",
+              options: (data.cards ?? [])
+                .filter((c) => c.active && c.currency === currentCurrency)
+                .map((c): [string, string] => [c.id, c.name]),
+              required: true,
+            },
+            {
+              key: "installments",
+              label: "Número de cuotas",
+              type: "number",
+              default: 1,
+              min: 1,
+              max: 120,
+              step: "1",
+              required: true,
+            },
+          ]
+        : []),
+      ...(["income"].includes(type) || creditExpense
         ? []
         : [
             {
@@ -618,8 +668,12 @@ export function ResourceForm({
           ]
         : []),
       description,
-      { key: "payment_method", label: "Medio de pago" },
-      { key: "notes", label: "Observaciones" },
+      ...(!creditExpense
+        ? [
+            { key: "payment_method", label: "Medio de pago" },
+            { key: "notes", label: "Observaciones" },
+          ]
+        : []),
     ],
   };
   const editFields: Record<string, string[]> = {
@@ -731,6 +785,7 @@ export function ResourceForm({
           zone: data.profile?.[0]?.timezone ?? "America/Lima",
         }).toISO();
       if (resource === "goals") p.priority = Number(p.priority ?? 2);
+      delete p.funding_source;
       z.record(z.string(), z.unknown()).parse(p);
       const serialized = JSON.stringify({ p, ratios });
       if (lastPayload.current && lastPayload.current !== serialized)
@@ -754,6 +809,32 @@ export function ResourceForm({
         )
           throw new Error("Los porcentajes de participación deben sumar 100%.");
         await api("/goals/" + p.goal_id + "/members", "PUT", { members });
+      } else if (creditExpense) {
+        if (
+          !(data.cards ?? []).some(
+            (c) => c.id === p.card_id && c.active && c.currency === p.currency,
+          )
+        )
+          throw new Error(
+            "Elige una tarjeta de crédito activa en la moneda del gasto.",
+          );
+        const result = await api(
+          "/purchases",
+          "POST",
+          {
+            card_id: p.card_id,
+            category_id: p.category_id,
+            amount: p.amount,
+            description: p.description,
+            purchased_at: DateTime.fromISO(p.occurred_at)
+              .setZone(data.profile?.[0]?.timezone ?? "America/Lima")
+              .toISODate(),
+            installments: p.installments,
+            kind: "purchase",
+          },
+          idempotency.current,
+        );
+        created = { resource: "purchases", id: result.id };
       } else if (ai) {
         const draft = await api("/ai/drafts", "POST", p);
         await api(
@@ -856,6 +937,18 @@ export function ResourceForm({
           </>
         ) : (
           <form onSubmit={submit}>
+            {creditExpense && (
+              <p className="callout">
+                Este gasto se registrará como compra en la tarjeta y en los
+                gastos del mes. Aumentará la deuda de crédito; no descontará
+                saldo de tus cuentas.{" "}
+                {(data.cards ?? []).some(
+                  (c) => c.active && c.currency === currentCurrency,
+                )
+                  ? ""
+                  : "Añade una tarjeta activa en esta moneda desde Tarjetas de crédito para continuar."}
+              </p>
+            )}
             <div className="form-grid">
               {selected.map((f) =>
                 f.type === "ratios" ? (
@@ -1001,7 +1094,11 @@ export function ResourceForm({
                         type={f.type ?? "text"}
                         defaultValue={initial[f.key] ?? f.default ?? ""}
                         required={f.required}
-                        step={f.type === "number" ? "0.01" : undefined}
+                        step={
+                          f.type === "number" ? (f.step ?? "0.01") : undefined
+                        }
+                        min={f.min}
+                        max={f.max}
                         maxLength={f.type === "number" ? undefined : 2000}
                       />
                     )}

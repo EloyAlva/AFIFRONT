@@ -651,6 +651,117 @@ for (const username of ["mramirez", "ealva"]) {
     ).toBeVisible();
   });
 }
+test("Un gasto sin saldo puede registrarse con tarjeta sin descontar efectivo", async ({
+  page,
+}) => {
+  await mock(page);
+  const card = "88888888-8888-4888-8888-888888888888";
+  await page.route("**/api/v1/cards?*", (r) =>
+    r.fulfill({
+      json: {
+        data: [
+          { id: card, name: "Visa crédito", currency: "PEN", active: true },
+          { id: "inactive", name: "Inactiva", currency: "PEN", active: false },
+          { id: "usd", name: "Dólares", currency: "USD", active: true },
+        ],
+        total: 3,
+      },
+    }),
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Registro manual", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Monto").fill("120");
+  await dialog.getByLabel("Cuenta de origen").selectOption(aid);
+  await dialog
+    .getByRole("combobox", { name: "Categoría", exact: true })
+    .selectOption(gid);
+  await dialog.getByLabel("Descripción").fill("Compra con crédito");
+  let accountAttempts = 0;
+  await page.route("**/api/v1/transactions", (r) => {
+    accountAttempts++;
+    return r.fulfill({
+      status: 422,
+      json: { error: { message: "Insufficient account balance" } },
+    });
+  });
+  await dialog.getByRole("button", { name: /Guardar movimiento/ }).click();
+  await expect(
+    dialog.getByText(/La cuenta elegida no tiene saldo suficiente/),
+  ).toBeVisible();
+  await expect(dialog).not.toContainText("Insufficient account balance");
+  await dialog.getByLabel("Pagar con").selectOption("credit_card");
+  await expect(
+    dialog.getByLabel("Cuenta de origen", { exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    dialog
+      .getByRole("combobox", { name: /^Tarjeta de crédito/ })
+      .locator("option"),
+  ).toHaveCount(2);
+  await dialog
+    .getByRole("combobox", { name: /^Tarjeta de crédito/ })
+    .selectOption(card);
+  await dialog.getByLabel("Número de cuotas").fill("3");
+  const request = page.waitForRequest(
+    (r) => r.url().endsWith("/purchases") && r.method() === "POST",
+  );
+  await dialog.getByRole("button", { name: /Guardar movimiento/ }).click();
+  const purchase = await request;
+  expect(purchase.postDataJSON()).toMatchObject({
+    card_id: card,
+    category_id: gid,
+    amount: 120,
+    description: "Compra con crédito",
+    installments: 3,
+    kind: "purchase",
+  });
+  expect(purchase.postDataJSON().purchased_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(purchase.postDataJSON()).not.toHaveProperty("source_account_id");
+  expect(purchase.headers()["idempotency-key"]).toBeTruthy();
+  expect(accountAttempts).toBe(1);
+  await expect(dialog).not.toBeVisible();
+});
+
+test("El asistente conserva el gasto al pasar a una tarjeta de crédito", async ({
+  page,
+}) => {
+  await mock(page);
+  await page.route("**/api/v1/ai/interpret", (r) =>
+    r.fulfill({
+      json: {
+        extracted: {
+          type: "expense",
+          amount: 25,
+          currency: "PEN",
+          description: "Almuerzo",
+          account_id: null,
+          category_id: gid,
+          date: now.slice(0, 10),
+        },
+      },
+    }),
+  );
+  await page
+    .getByLabel("Mensaje para AFI")
+    .fill("Gasté 25 en almuerzo con tarjeta");
+  await page
+    .getByRole("button", { name: "Enviar mensaje", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Pagar con tarjeta de crédito", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Monto")).toHaveValue("25");
+  await expect(dialog.getByLabel("Descripción")).toHaveValue("Almuerzo");
+  await expect(dialog.getByLabel("Pagar con")).toHaveValue("credit_card");
+  await expect(
+    dialog.getByLabel("Cuenta de origen", { exact: true }),
+  ).not.toBeVisible();
+});
+
 const uid = "11111111-1111-4111-8111-111111111111";
 const aid = "22222222-2222-4222-8222-222222222222";
 const gid = "33333333-3333-4333-8333-333333333333";
