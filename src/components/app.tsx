@@ -2408,6 +2408,23 @@ export function App() {
                           <Button
                             size="sm"
                             variant="outline"
+                            onClick={() => edit("spaces", s)}
+                          >
+                            Editar espacio
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              if (window.confirm(`¿Eliminar el espacio «${s.name}»? Se eliminarán sus miembros e invitaciones. Esta acción no se puede deshacer. Los espacios con objetivos asociados no se pueden eliminar.`))
+                                void act("/spaces/" + s.id, undefined, "DELETE");
+                            }}
+                          >
+                            Eliminar espacio
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             onClick={() => setInvitePicker({ space_id: s.id })}
                           >
                             Invitar

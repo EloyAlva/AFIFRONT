@@ -607,6 +607,7 @@ export function ResourceForm({
     ],
   };
   const editFields: Record<string, string[]> = {
+    spaces: ["name"],
     accounts: ["name"],
     categories: ["name"],
     cards: ["name", "bank", "closing_day", "due_day", "utilization_limit"],
