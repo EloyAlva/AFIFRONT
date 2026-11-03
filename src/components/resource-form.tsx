@@ -5,6 +5,7 @@ import { z } from "zod";
 import { X } from "lucide-react";
 import { DateTime } from "luxon";
 import { api } from "@/lib/api";
+import { deadlineDistribution } from "@/lib/savings";
 import { Button } from "./ui/button";
 export type Row = Record<string, any>;
 type Field = {
@@ -401,7 +402,7 @@ export function ResourceForm({
       },
       {
         key: "ideal_amount",
-        label: "Monto ideal",
+        label: "Importe total del objetivo",
         type: "number",
         required: true,
       },
@@ -508,7 +509,16 @@ export function ResourceForm({
         label: "Objetivo compartido",
         type: "select",
         options: (data.goals ?? [])
-          .filter((g) => g.space_id)
+          .filter(
+            (g) =>
+              g.space_id &&
+              data.members?.some(
+                (m) =>
+                  m.space_id === g.space_id &&
+                  m.user_id === data.profile?.[0]?.id &&
+                  m.role === "admin",
+              ),
+          )
           .map((g) => [g.id, g.name]),
         required: true,
       },
@@ -646,6 +656,17 @@ export function ResourceForm({
           )
           .map((m) => [m.user_id, m.display_name || "Participante"]);
   useEffect(() => {
+    if (resource !== "participation") return;
+    const existing = (data["goal-members"] ?? []).filter(
+      (m) => m.goal_id === values.goal_id,
+    );
+    setRatios(
+      Object.fromEntries(
+        existing.map((m) => [m.user_id, String(m.percentage)]),
+      ),
+    );
+  }, [resource, values.goal_id, data]);
+  useEffect(() => {
     const first = dialog.current?.querySelector<HTMLElement>(
       "input,select,textarea,button",
     );
@@ -715,6 +736,10 @@ export function ResourceForm({
           user_id,
           percentage: Number(ratios[user_id] ?? 0),
         }));
+        if (
+          Math.abs(members.reduce((s, m) => s + m.percentage, 0) - 100) > 0.001
+        )
+          throw new Error("Los porcentajes de participación deben sumar 100%.");
         await api("/goals/" + p.goal_id + "/members", "PUT", { members });
       } else if (ai) {
         const draft = await api("/ai/drafts", "POST", p);
@@ -835,6 +860,42 @@ export function ResourceForm({
                     >
                       {f.label}
                     </legend>
+                    {resource === "distribution" && (
+                      <div style={{ marginBottom: 16 }}>
+                        <p className="detail">
+                          Sugerencia por fecha de fin: con tres objetivos
+                          pendientes, 50%, 30% y 20%, del más próximo al más
+                          lejano. Puedes ajustar los porcentajes antes de
+                          confirmar.
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const suggestion = deadlineDistribution(
+                              data.goals ?? [],
+                              data.allocations ?? [],
+                              currentCurrency,
+                            );
+                            setRatios({
+                              ...Object.fromEntries(
+                                ratioItems.map(([id]) => [id, "0"]),
+                              ),
+                              ...Object.fromEntries(
+                                suggestion.map((g) => [
+                                  g.id,
+                                  String(g.percentage),
+                                ]),
+                              ),
+                              unassigned: suggestion.length ? "0" : "100",
+                            });
+                          }}
+                        >
+                          Sugerir por fecha de fin
+                        </Button>
+                      </div>
+                    )}
                     {ratioItems.length ? (
                       ratioItems.map(([id, label]) => (
                         <label

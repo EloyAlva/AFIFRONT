@@ -41,6 +41,14 @@ Configura SMTP y las Redirect URLs de Supabase para permitir el origen de la apl
 
 ## Uso
 
+### Objetivos, participación y meta mensual de ahorro
+
+Los espacios agrupan personas y objetivos; no tienen importe. Cada objetivo define su importe total, moneda y fecha de fin. En un objetivo compartido, el administrador puede abrir **Definir aportes por persona**: los porcentajes suman 100% y cada participante muestra su importe esperado, sus aportes confirmados y el saldo pendiente. Estos porcentajes pertenecen a ese objetivo.
+
+En Objetivos se muestra una sugerencia de distribución del ahorro por fecha de fin. En **Distribuir por porcentaje → Sugerir por fecha de fin**, tres objetivos pendientes reciben 50%, 30% y 20%, del más cercano al más lejano. Para otras cantidades se normalizan pesos descendentes (por ejemplo, dos objetivos reciben 66.66% y 33.34%). Se excluyen objetivos completados y otras monedas. El reparto se puede editar y solo se registra al confirmar el importe del fondo que se quiere distribuir. Este reparto entre objetivos es independiente de la participación entre personas.
+
+El Resumen muestra el ahorro neto del mes (reservas menos retiros), su porcentaje respecto de los ingresos del mismo mes y una alerta por el importe pendiente. La meta predeterminada es 20%, editable de 0% a 100% en **Configuración → Meta de ahorro mensual**. El cálculo usa el mes seleccionado y la zona horaria del perfil; no cuenta saldos de ahorro anteriores ni movimientos anulados. Sin ingresos, el porcentaje se muestra como no disponible. Aplica la migración `011_savings_target.sql` del backend para persistir esta preferencia.
+
 ### Configurar categorías
 
 Abre **Configuración → Categorías de ingresos y egresos**. Verás dos grupos con su explicación: ingresos para dinero recibido y egresos para dinero gastado. Puedes buscar por nombre, crear una categoría eligiendo su tipo y renombrar las existentes con **Editar**. Cada grupo tiene un botón **Agregar categoría** que preselecciona su tipo. El mismo nombre puede existir en tipos distintos; se avisa si ya existe en el mismo tipo.

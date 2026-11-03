@@ -56,6 +56,7 @@ import {
   formatMoney,
 } from "@/lib/api";
 import { Button } from "./ui/button";
+import { deadlineDistribution } from "@/lib/savings";
 import {
   RegisteredInvitations,
   InvitationInbox,
@@ -1160,7 +1161,53 @@ export function App() {
                       foot={`${money(summary.unallocated)} sin asignar a metas`}
                       icon={Target}
                     />
+                    <Stat
+                      label="Ahorro del mes / ingresos"
+                      value={
+                        summary.savingsIndicator?.actualPercentage == null
+                          ? "Sin ingresos"
+                          : `${summary.savingsIndicator.actualPercentage.toFixed(1)}%`
+                      }
+                      foot={`Meta: ${summary.savingsIndicator?.targetPercentage ?? 20}% · Falta ${money(summary.savingsIndicator?.shortfall)}`}
+                      icon={Target}
+                      tone={
+                        summary.savingsIndicator?.status === "behind"
+                          ? "negative"
+                          : "positive"
+                      }
+                    />
                   </div>
+                  {summary.savingsIndicator && (
+                    <div className="callout">
+                      <Target size={19} />
+                      <div>
+                        <h3>Meta de ahorro de {month}</h3>
+                        <p>
+                          Del primer al último día del mes: reserva el{" "}
+                          {summary.savingsIndicator.targetPercentage}% de tus
+                          ingresos registrados (
+                          {money(summary.savingsIndicator.target)}). Llevas{" "}
+                          {money(summary.savingsIndicator.saved)} de ahorro neto
+                          este mes.
+                        </p>
+                        <p>
+                          {summary.savingsIndicator.status === "no_income"
+                            ? "Registra ingresos para calcular la meta."
+                            : summary.savingsIndicator.status === "behind"
+                              ? `Alerta: te faltan ${money(summary.savingsIndicator.shortfall)} para alcanzar tu meta de ahorro.`
+                              : "Has alcanzado tu meta de ahorro con los ingresos registrados."}
+                        </p>
+                        <small>
+                          Los retiros reducen el ahorro del mes. La meta se
+                          actualiza con cada ingreso. Puedes cambiar el
+                          porcentaje en Configuración.
+                        </small>
+                        <Progress
+                          value={summary.savingsIndicator.progress ?? 0}
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div className="callout">
                     <ShieldCheck size={19} />
                     <div>
@@ -2172,6 +2219,17 @@ export function App() {
                 foot="Estimación conservadora del período"
                 icon={TrendingUp}
               />
+              <Stat
+                label="Meta de ahorro mensual"
+                value={money(summary?.savingsIndicator?.target)}
+                foot={`${summary?.savingsIndicator?.targetPercentage ?? 20}% de ingresos · Falta ${money(summary?.savingsIndicator?.shortfall)}`}
+                icon={Target}
+                tone={
+                  summary?.savingsIndicator?.status === "behind"
+                    ? "negative"
+                    : undefined
+                }
+              />
             </div>
             <div className="toolbar">
               <Button
@@ -2210,6 +2268,34 @@ export function App() {
                 Retirar reserva
               </Button>
             </div>
+            <section className="card" style={{ marginBottom: 20 }}>
+              <h2>Distribución sugerida por fecha de fin</h2>
+              <p className="detail">
+                Los objetivos más próximos reciben mayor porcentaje. Con tres
+                objetivos pendientes: 50%, 30% y 20%. Con otra cantidad se usan
+                pesos descendentes; los objetivos completados quedan fuera. Se
+                aplica a tu ahorro, en la moneda seleccionada, al confirmar la
+                distribución.
+              </p>
+              {deadlineDistribution(
+                data.goals ?? [],
+                data.allocations ?? [],
+                currency,
+              ).map((g) => (
+                <div className="list-row" key={g.id}>
+                  <span>
+                    {g.name} · {g.target_date}
+                  </span>
+                  <strong>{g.percentage.toFixed(2)}%</strong>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                onClick={() => open("distribution", { currency })}
+              >
+                Distribuir ahorro
+              </Button>
+            </section>
             <div className="grid-3">
               {summary?.goals.map((g: Row) => (
                 <section className="card" key={g.id}>
@@ -2243,6 +2329,68 @@ export function App() {
                     </Button>
                   </div>
                   <p className="detail">{g.description}</p>
+                  {g.space_id && (
+                    <div>
+                      <p className="detail">
+                        Espacio:{" "}
+                        {data.spaces?.find((s) => s.id === g.space_id)?.name}
+                      </p>
+                      {data.members?.some(
+                        (m) =>
+                          m.space_id === g.space_id &&
+                          m.user_id === session.user.id &&
+                          m.role === "admin",
+                      ) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            open("participation", { goal_id: g.id })
+                          }
+                        >
+                          Definir aportes por persona
+                        </Button>
+                      )}
+                      {!(data["goal-members"] ?? []).some(
+                        (m) => m.goal_id === g.id,
+                      ) && (
+                        <p className="detail">
+                          Participación pendiente de definir (debe sumar 100%).
+                        </p>
+                      )}
+                      {(data["goal-members"] ?? [])
+                        .filter((m) => m.goal_id === g.id)
+                        .map((m) => {
+                          const contributed = (data.allocations ?? [])
+                            .filter(
+                              (a) =>
+                                a.goal_id === g.id && a.user_id === m.user_id,
+                            )
+                            .reduce((s, a) => s + Number(a.amount), 0);
+                          const target =
+                            (Number(g.ideal_amount) * Number(m.percentage)) /
+                            100;
+                          return (
+                            <p className="detail" key={m.user_id}>
+                              {m.user_id === session.user.id
+                                ? "Tú"
+                                : data.members?.find(
+                                    (p) =>
+                                      p.space_id === g.space_id &&
+                                      p.user_id === m.user_id,
+                                  )?.display_name || "Participante"}
+                              : {m.percentage}% · Meta{" "}
+                              {formatMoney(target, g.currency)} · Aportado{" "}
+                              {formatMoney(contributed, g.currency)} · Falta{" "}
+                              {formatMoney(
+                                Math.max(0, target - contributed),
+                                g.currency,
+                              )}
+                            </p>
+                          );
+                        })}
+                    </div>
+                  )}
                   <div className="stat-value" style={{ marginTop: 20 }}>
                     {money(g.confirmed)}
                   </div>
@@ -2333,9 +2481,6 @@ export function App() {
                 <Plus size={15} />
                 Invitar usuarios registrados
               </Button>
-              <Button variant="outline" onClick={() => open("participation")}>
-                Definir participación
-              </Button>
             </div>
             <div className="grid-2">
               {data.spaces?.map((s) => {
@@ -2397,9 +2542,13 @@ export function App() {
                       .map((g) => (
                         <div className="list-row" key={g.id}>
                           <h3>{g.name}</h3>
-                          <span className="badge">
-                            {formatMoney(g.ideal_amount, g.currency)}
-                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => navigate("goals")}
+                          >
+                            Ver objetivo
+                          </Button>
                         </div>
                       ))}
                     {admin && (
@@ -2416,8 +2565,16 @@ export function App() {
                             size="sm"
                             variant="ghost"
                             onClick={() => {
-                              if (window.confirm(`¿Eliminar el espacio «${s.name}»? Se eliminarán sus miembros e invitaciones. Esta acción no se puede deshacer. Los espacios con objetivos asociados no se pueden eliminar.`))
-                                void act("/spaces/" + s.id, undefined, "DELETE");
+                              if (
+                                window.confirm(
+                                  `¿Eliminar el espacio «${s.name}»? Se eliminarán sus miembros e invitaciones. Esta acción no se puede deshacer. Los espacios con objetivos asociados no se pueden eliminar.`,
+                                )
+                              )
+                                void act(
+                                  "/spaces/" + s.id,
+                                  undefined,
+                                  "DELETE",
+                                );
                             }}
                           >
                             Eliminar espacio
@@ -2576,6 +2733,9 @@ export function App() {
                       display_name: f.get("display_name"),
                       currency: f.get("currency"),
                       timezone: f.get("timezone"),
+                      savings_target_percentage: Number(
+                        f.get("savings_target_percentage"),
+                      ),
                       ant_expense_threshold: Number(
                         f.get("ant_expense_threshold"),
                       ),
@@ -2625,6 +2785,20 @@ export function App() {
                     name="ant_expense_threshold"
                     defaultValue={
                       data.preferences?.[0]?.ant_expense_threshold ?? 20
+                    }
+                  />
+                </label>
+                <label>
+                  Meta de ahorro mensual (% de ingresos)
+                  <input
+                    name="savings_target_percentage"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    required
+                    defaultValue={
+                      data.preferences?.[0]?.savings_target_percentage ?? 20
                     }
                   />
                 </label>

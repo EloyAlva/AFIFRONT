@@ -1419,6 +1419,120 @@ test("Editar el resumen y reintentar conservan una sola confirmación idempotent
   expect(keys[0]).toBe(keys[1]);
 });
 
+test("Objetivos compartidos muestran cuotas y sugieren reparto por vencimiento", async ({
+  page,
+}) => {
+  await mock(page);
+  const space = "66666666-6666-4666-8666-666666666666";
+  const other = "77777777-7777-4777-8777-777777777777";
+  const goals = [
+    {
+      id: gid,
+      name: "Viaje compartido",
+      currency: "PEN",
+      space_id: space,
+      ideal_amount: 1000,
+      target_date: "2026-12-01",
+      confirmed: 100,
+      planned: 0,
+      remaining: 900,
+      progress: 10,
+      priority: 2,
+    },
+    {
+      id: "later",
+      name: "Estudios",
+      currency: "PEN",
+      ideal_amount: 2000,
+      target_date: "2027-03-01",
+      confirmed: 0,
+      planned: 0,
+      remaining: 2000,
+      progress: 0,
+      priority: 2,
+    },
+    {
+      id: "middle",
+      name: "Equipo",
+      currency: "PEN",
+      ideal_amount: 1500,
+      target_date: "2027-01-01",
+      confirmed: 0,
+      planned: 0,
+      remaining: 1500,
+      progress: 0,
+      priority: 2,
+    },
+  ];
+  const fixtures: Record<string, any[]> = {
+    goals,
+    spaces: [{ id: space, name: "Familia", owner_id: uid }],
+    members: [
+      { space_id: space, user_id: uid, role: "admin", display_name: "Eloy" },
+      {
+        space_id: space,
+        user_id: other,
+        role: "member",
+        display_name: "Marines",
+      },
+    ],
+    "goal-members": [
+      { goal_id: gid, user_id: uid, percentage: 60 },
+      { goal_id: gid, user_id: other, percentage: 40 },
+    ],
+  };
+  for (const [resource, data] of Object.entries(fixtures)) {
+    await page.route(`**/api/v1/${resource}?*`, (r) =>
+      r.fulfill({ json: { data, total: data.length } }),
+    );
+  }
+  await page.route("**/api/v1/dashboard?*", (r) =>
+    r.fulfill({ json: { ...summary, goals } }),
+  );
+  await page.reload();
+  await page
+    .locator("nav")
+    .getByRole("button", { name: "Objetivos de ahorro", exact: true })
+    .click();
+  await expect(page.getByText(/Tú: 60% · Meta/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "Definir aportes por persona" })
+    .click();
+  await expect(page.getByLabel("Porcentaje Eloy", { exact: true })).toHaveValue(
+    "60",
+  );
+  await expect(
+    page.getByLabel("Porcentaje Marines", { exact: true }),
+  ).toHaveValue("40");
+  await page.getByLabel("Porcentaje Eloy", { exact: true }).fill("70");
+  await page.getByLabel("Porcentaje Marines", { exact: true }).fill("30");
+  const participation = page.waitForRequest((r) =>
+    r.url().endsWith(`/goals/${gid}/members`),
+  );
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Guardar participación/ })
+    .click();
+  expect((await participation).postDataJSON().members).toEqual([
+    { user_id: uid, percentage: 70 },
+    { user_id: other, percentage: 30 },
+  ]);
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Distribuir por porcentaje", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Sugerir por fecha de fin" }).click();
+  await expect(
+    page.getByLabel("Porcentaje Viaje compartido", { exact: true }),
+  ).toHaveValue("50");
+  await expect(
+    page.getByLabel("Porcentaje Equipo", { exact: true }),
+  ).toHaveValue("30");
+  await expect(
+    page.getByLabel("Porcentaje Estudios", { exact: true }),
+  ).toHaveValue("20");
+});
+
 test("El reparto porcentual utiliza nombres y confirma un único lote", async ({
   page,
 }) => {
